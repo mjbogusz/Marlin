@@ -1592,6 +1592,9 @@
 #elif HAS_UI_1024x600
   #define LCD_HEIGHT TERN(TOUCH_SCREEN, 12, 13) // Fewer lines with touch buttons onscreen
 #endif
+#if ANY(HAS_UI_480x320, HAS_UI_480x272)
+  #define CAN_SHOW_REMAINING_TIME 1
+#endif
 
 // This emulated DOGM has 'touch/xpt2046', not 'tft/xpt2046'
 #if ENABLED(TOUCH_SCREEN)
