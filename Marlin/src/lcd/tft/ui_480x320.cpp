@@ -342,7 +342,7 @@ void MarlinUI::draw_status_screen() {
     tft.set_background(COLOR_BACKGROUND);
     tft_string.set(elapsed_str);
     uint16_t text_pos_x = tft_string.center(time_str_width - image_width);
-    tft.add_image(text_pos_x, 0, imgFeedRate, COLOR_PRINT_TIME);
+    tft.add_image(text_pos_x, 0, imgTimeElapsed, COLOR_PRINT_TIME);
     tft.add_text(text_pos_x + image_width, 1, COLOR_PRINT_TIME, tft_string);
   #else
     // Print duration so far (time elapsed) - aligned under feed rate
@@ -352,7 +352,7 @@ void MarlinUI::draw_status_screen() {
 
     tft.canvas(96, y, 144, 32);
     tft.set_background(COLOR_BACKGROUND);
-    tft.add_image(0, 0, imgFeedRate, COLOR_PRINT_TIME);
+    tft.add_image(0, 0, imgTimeElapsed, COLOR_PRINT_TIME);
     tft_string.set(elapsed_str);
     tft.add_text(36, 1, COLOR_PRINT_TIME, tft_string);
 
@@ -384,7 +384,7 @@ void MarlinUI::draw_status_screen() {
     tft.canvas(256, y, 144, 32);
     tft.set_background(COLOR_BACKGROUND);
     color = printingIsActive() ? COLOR_PRINT_TIME : COLOR_INACTIVE;
-    tft.add_image(0, 0, imgFeedRate, color);
+    tft.add_image(0, 0, imgTimeRemaining, color);
     tft.add_text(36, 1, color, tft_string);
   #endif
 
