@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""
+A Script to convert RGB(A) bitmaps into tricky 4-bit grayscale byte array with alpha mask.
+
+Based on https://github.com/EvilGremlin/Marlin/blob/newcolor_ui/Marlin/src/lcd/tft_newcolor/convert.py.
+
+The output format is as follows:
+* 0x0 to 0x7 is antialiased shadows
+* 0x8 is alpha mask
+* 0x9 to 0xF is antialiased foreground
+* transparent pixels in bitmap must be within 120...136 range (set to 128=0x80 in source)
+
+Usage: buildroot/bin/bitmap2cpp path/to/bitmap_1.bmp path/to/bitmap_2.bmp [...]
+Then open tft_image.cpp and tft_image.h and paste the added lines in the correct spots.
+"""
+
+import os
+import fileinput
+
+gpltext = '''/**\n \
+* Marlin 3D Printer Firmware\n \
+* Copyright (c) 2022 MarlinFirmware [https://github.com/MarlinFirmware/Marlin]\n \
+*\n \
+* This program is free software: you can redistribute it and/or modify\n \
+* it under the terms of the GNU General Public License as published by\n \
+* the Free Software Foundation, either version 3 of the License, or\n \
+* (at your option) any later version.\n \
+*\n \
+* This program is distributed in the hope that it will be useful,\n \
+* but WITHOUT ANY WARRANTY; without even the implied warranty of\n \
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n \
+* GNU General Public License for more details.\n \
+*\n \
+* You should have received a copy of the GNU General Public License\n \
+* along with this program.  If not, see <https://www.gnu.org/licenses/>.\n \
+**/\n\n'''
+
+def getSize(filename):
+    st = os.stat(filename)
+    return st.st_size
+
+cpp1 = []
+cpp2 = []
+h1 = []
+h2 = []
+h3 = []
+
+# Ensure a proper working directory
+os.chdir(os.path.join(os.path.dirname( __file__ ), '..', '..', 'Marlin', 'src', 'lcd', 'tft'))
+
+# Open the files passed in as args (fileinput by default iterates over argv[1:])
+with fileinput.input(mode='rb') as flist:
+    for c in flist:
+        # get every Nth byte of RGB(A) bitmap into array
+        strip = bytearray()
+        bit4 = []
+        width = 0
+        height = 0
+        cf = fileinput.filename()
+        with open(cf, mode='rb') as f:
+            f.seek(18)
+            width = int.from_bytes(f.read(4), 'little') # read width from header
+            f.seek(22)
+            height = int.from_bytes(f.read(4), 'little') # read height from header
+            f.seek(28)
+            bpp = [4 if int.from_bytes(f.read(1), 'little')==32 else 3] # read bits per pixel from header
+            bpp = int(''.join(str(i) for i in bpp))
+            f.seek(10)
+            dstart = int.from_bytes(f.read(4), 'little') # find bitmap data offset
+            i = dstart-2
+            while i <= getSize(cf):
+                i += bpp           # read bytes, image must be monochrome for it all to work right
+                f.seek(i)
+                strip += bytearray(f.read(1))
+
+        # floor divide every byte 16 to get 4-bit hex value
+        j=0
+        while j <= len(strip)-1:
+            a = strip[j]
+            # find transparent pixels
+            bit4.append(hex(8 if a in range(120, 136) else a//16)) # snoop around 0x8 because why it would be easy?
+            j += 1
+        hexstrip = "".join(bit4).replace("0x","")
+
+        # write .cpp with output byte array
+        name, _ = os.path.splitext(os.path.basename(cf)) # get image name = file name without extension
+        name_res = f'{name}_{width}x{height}x4' # construct class name (image name with resolution)
+        outfile = os.path.join(os.path.dirname(os.path.relpath(cf)), '..', 'images', f'{name_res}.cpp') # construct output file name
+        with open(outfile, mode='w', encoding='utf-8') as of:
+            of.write(gpltext)
+            of.write('''#include "../../../inc/MarlinConfigPre.h"\n\n#if HAS_GRAPHICAL_TFT\n\n''')
+            of.write('extern const uint8_t ' + name_res + '''[''' + str(len(hexstrip)//2) + '''] = {\n''')
+
+            split1 = [hexstrip[i : i+width] for i in range(0, len(hexstrip), width)] # cut into lines
+            split2 = [[0 for i in range(width)] for j in range(height)] # init empty array
+            split2 = [[split1[i][j:j+2] for j in range(0, width, 2)] for i in range( 0, height)] # cut into pixels
+            split2.reverse() # because bmp is backwards, remember images loading from bottom to top?
+
+            for i in range(0, height):
+                of.write('  0x' + ', 0x'.join(split2[i]) +',\n') # actual byte array
+
+            of.write('''};\n#endif // HAS_GRAPHICAL_TFT\n''')
+
+        name_res_caps = '_'.join([x.capitalize() for x in name_res.split('_')])
+        name_caps = ''.join([x.capitalize() for x in name.split('_')])
+
+        # constucting all required cpp definitions
+        cpp1.append(
+            f'const tImage {name_res_caps}      = {{ (void *){name_res}'
+            f', {str(width)}, {str(height)}, GREYSCALE4 }};\n'
+        )
+        cpp2.append(f'  {name_res_caps},\n')
+        h1.append(f'extern const uint8_t {name_res}[];\n')
+        h2.append(f'  img{name_caps},\n')
+        h3.append(f'extern const tImage {name_res_caps};\n')
+        fileinput.nextfile()
+
+with open("./tft_image.cpp", "r+") as f:
+    linesout = []
+    list = enumerate(f, 0)
+
+    # replace lines between tags with new defines
+    # TODO: refactor this and/or ensure proper comment tags exist in the target file
+    for i, line in list:
+        if line.strip() != '//startcpp1': linesout.append(line)
+        else: linesout.append(line); break
+    linesout.extend(cpp1)
+    for i, line in list:
+        if line.strip() == '//endcpp1': linesout.append(line); break
+
+    for i, line in list:
+        if line.strip() != '//startcpp2': linesout.append(line)
+        else: linesout.append(line); break
+    linesout.extend(cpp2)
+    for i, line in list:
+        if line.strip() == '//endcpp2': linesout.append(line); break
+    for i, line in list:
+        linesout.append(line)
+
+    # overwrite the whole file
+    f.seek(0)
+    f.writelines(linesout)
+    f.truncate()
+
+
+with open("./tft_image.h", "r+") as f:
+    linesout = []
+    list = enumerate(f, 0)
+
+    # replace lines between tags with new defines
+    # TODO: refactor this and/or ensure proper comment tags exist in the target file
+    for i, line in list:
+        if line.strip() != '//starth1': linesout.append(line)
+        else: linesout.append(line); break
+    linesout.extend(h1)
+    for i, line in list:
+        if line.strip() == '//endh1': linesout.append(line); break
+
+    for i, line in list:
+        if line.strip() != '//starth2': linesout.append(line)
+        else: linesout.append(line); break
+    linesout.extend(h2)
+    for i, line in list:
+        if line.strip() == '//endh2': linesout.append(line); break
+
+    for i, line in list:
+        if line.strip() != '//starth3': linesout.append(line)
+        else: linesout.append(line); break
+    linesout.extend(h3)
+    for i, line in list:
+        if line.strip() == '//endh3': linesout.append(line); break
+    for i, line in list:
+        linesout.append(line)
+
+    f.seek(0)
+    f.writelines(linesout)
+    f.truncate()
