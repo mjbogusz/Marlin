@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"explorer.excludeGitIgnore": false,
+		"search.useIgnoreFiles": false,
+		"files.associations": {
+			".clang-tidy": "yaml",
+			"random": "cpp"
+		}
+	}
+}
